@@ -18,22 +18,59 @@ exports.handler = async (event) => {
     return { statusCode: 204, headers: CORS_HEADERS, body: '' };
   }
 
-  try {
-    let targetUrl;
-    let fetchOptions;
+     if (event.httpMethod === 'POST') {
+      try {
+        console.log('[PROXY POST] body length:', (event.body || '').length);
+        const bodyPreview = (event.body || '').substring(0, 200);
+        console.log('[PROXY POST] body preview:', bodyPreview);
 
-    if (event.httpMethod === 'GET') {
-      const query = event.rawQuery ? '?' + event.rawQuery : '';
-      targetUrl = APPS_SCRIPT_URL + query;
-      fetchOptions = { method: 'GET', redirect: 'follow' };
-    } else if (event.httpMethod === 'POST') {
-      targetUrl = APPS_SCRIPT_URL;
-      fetchOptions = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: event.body,
-        redirect: 'follow'
-      };
+        const appsResponse = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: event.body,
+          redirect: 'follow'
+        });
+
+        console.log('[PROXY POST] status:', appsResponse.status);
+        console.log('[PROXY POST] content-type:', appsResponse.headers.get('content-type'));
+        console.log('[PROXY POST] final url:', appsResponse.url);
+
+        const text = await appsResponse.text();
+        console.log('[PROXY POST] response preview:', text.substring(0, 300));
+
+        // Если ответ — HTML, значит Apps Script нас не принял
+        if (text.trim().toLowerCase().startsWith('<!doctype')) {
+          return {
+            statusCode: 200,
+            headers: {
+              ...CORS_HEADERS,
+              'Content-Type': 'application/json; charset=utf-8'
+            },
+            body: JSON.stringify({
+              ok: false,
+              error: 'Apps Script вернул HTML вместо JSON. Скорее всего POST не поддерживается или нужна авторизация.',
+              firstChars: text.substring(0, 200)
+            })
+          };
+        }
+
+        return {
+          statusCode: 200,
+          headers: {
+            ...CORS_HEADERS,
+            'Content-Type': 'application/json; charset=utf-8'
+          },
+          body: text
+        };
+      } catch (err) {
+        console.error('[PROXY POST] ERROR:', err);
+        return {
+          statusCode: 500,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ok: false, error: 'Proxy error: ' + err.message })
+        };
+      }
+    }
     } else {
       return { statusCode: 405, headers: CORS_HEADERS, body: 'Method not allowed' };
     }
